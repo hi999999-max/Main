@@ -1,0 +1,263 @@
+Tracer = {
+        TracerThickness = 3.5,
+        TracerTransparency = 1,
+        TracerColor = Color3.fromRGB(153, 50, 204)
+    }
+}
+
+local CurrentCamera = game:GetService("Workspace").CurrentCamera
+local Mouse = game.Players.LocalPlayer:GetMouse()
+local RunService = game:GetService("RunService")
+local LocalPlayer = game.Players.LocalPlayer
+local Line = Drawing.new("Line")
+local Inset = game:GetService("GuiService"):GetGuiInset().Y
+local Tool = nil
+local LockedPlayer = nil
+local lastEventFireTime = 0 -- Keeps track of when the event was last fired
+local fireEventInterval = 2 -- Set the interval to 5 seconds
+local originalCameraType = CurrentCamera.CameraType -- Save the original camera type
+local ScreenGui = Instance.new("ScreenGui")
+local AimlockButton = Instance.new("TextButton")
+
+ScreenGui.Parent = game.CoreGui
+AimlockButton.Parent = ScreenGui
+AimlockButton.Size = UDim2.new(0, 100, 0, 50)
+AimlockButton.Position = UDim2.new(0, 10, 0, 10)
+AimlockButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+AimlockButton.Text = "Aimlock Off"
+AimlockButton.Draggable = true
+AimlockButton.Active = true
+
+-- Function to reset the local player
+local function ResetLocalPlayer()
+    local character = LocalPlayer.Character
+    if character and character:FindFirstChild("Humanoid") then
+        character.Humanoid.Health = 0
+    end
+end
+
+-- Call this function at the start of the script to reset the player
+ResetLocalPlayer()
+
+local function UpdateButton()
+    if Settings.main.Mario then
+        AimlockButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        AimlockButton.Text = "Aimlock On"
+    else
+        AimlockButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        AimlockButton.Text = "Aimlock Off"
+    end
+end
+
+local function FindClosestUserToCenter()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+
+    local screenCenter = Vector2.new(CurrentCamera.ViewportSize.X / 2, CurrentCamera.ViewportSize.Y / 2)
+
+    for _, v in pairs(game.Players:GetPlayers()) do
+        if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Humanoid") and
+           v.Character.Humanoid.Health > 0 and v.Character:FindFirstChild("HumanoidRootPart") then
+            local pos = CurrentCamera:WorldToViewportPoint(v.Character.PrimaryPart.Position)
+            local magnitude = (Vector2.new(pos.X, pos.Y) - screenCenter).Magnitude
+            if magnitude < shortestDistance then
+                closestPlayer = v
+                shortestDistance = magnitude
+            end
+        end
+    end
+    return closestPlayer
+end
+
+local function ResolveTarget(player)
+    if player and player.Character and player.Character:FindFirstChild(Settings.main.Part) then
+        local part = player.Character[Settings.main.Part]
+        local predictedPosition = part.Position + (part.Velocity * Settings.main.Prediction)
+        return predictedPosition
+    end
+end
+
+local function EquipAndActivateTool()
+    Tool = LocalPlayer.Backpack:FindFirstChild("rev") or LocalPlayer.Character:FindFirstChild("rev")
+    if Tool then
+        -- Equip the tool if it's in the backpack
+        if Tool.Parent == LocalPlayer.Backpack then
+            LocalPlayer.Character.Humanoid:EquipTool(Tool)
+        end
+
+        -- Activate the tool
+        Tool:Activate() -- Activates the tool (e.g., shooting)
+    end
+end
+
+local function FireEvent()
+    local currentTime = tick()
+    if currentTime - lastEventFireTime >= fireEventInterval then
+        local eventPath = workspace:FindFirstChild(LocalPlayer.Name)
+        if eventPath and eventPath:FindFirstChild("rev") and eventPath.rev:FindFirstChild("rl") then
+            eventPath.rev.rl:FireServer() -- Fires the event if it exists
+            lastEventFireTime = currentTime -- Update the last fire time
+        end
+    end
+end
+
+local function FocusCameraOnPlayerHead(player)
+    if player and player.Character and player.Character:FindFirstChild("Head") then
+        local head = player.Character.Head
+        local offset = Vector3.new(0, 2, -5) -- Adjust camera offset closer and behind the player
+        CurrentCamera.CameraType = Enum.CameraType.Scriptable -- Switch camera to scriptable mode
+
+        -- Update the camera CFrame every frame to follow the head
+        RunService.RenderStepped:Connect(function()
+            if Settings.main.Mario and player and player.Character and player.Character:FindFirstChild("Head") then
+                head = player.Character.Head
+                CurrentCamera.CFrame = CFrame.new(head.Position + offset, head.Position) -- Camera follows the head
+            else
+                ResetCamera() -- Reset if Mario is turned off or player is lost
+            end
+        end)
+    end
+end
+
+local function ResetCamera()
+    CurrentCamera.CameraType = originalCameraType -- Restore original camera type
+end
+
+local function TeleportAroundPlayer(player)
+    if Settings.main.Orbit and player and player.Character and player.Character:FindFirstChild(Settings.main.Part) then
+        local part = player.Character[Settings.main.Part]
+        local radius = 5 -- Distance to teleport around the player
+        local angle = math.random() * math.pi * 2 -- Random angle to teleport
+
+        -- Calculate teleport position
+        local teleportPosition = part.Position + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+        LocalPlayer.Character:SetPrimaryPartCFrame(CFrame.new(teleportPosition)) -- Teleport the local player
+
+        -- Equip the tool and activate it
+        EquipAndActivateTool()
+
+        -- Focus the camera on the player's head
+        FocusCameraOnPlayerHead(player)
+    end
+end
+
+AimlockButton.MouseButton1Click:Connect(function()
+    if Settings.main.Mario then
+        Settings.main.Mario = false
+        LockedPlayer = nil
+        ResetCamera() -- Reset camera when aimlock is turned off
+        if Settings.main.Notifications then
+            game.StarterGui:SetCore("SendNotification", {
+                Title = "<3",
+                Text = "Aimlock Off"
+            })
+        end
+    else
+        LockedPlayer = FindClosestUserToCenter()
+        if LockedPlayer then
+            Settings.main.Mario = true
+            if Settings.main.Notifications then
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "<3",
+                    Text = "Locked on to: " .. tostring(LockedPlayer.Character.Humanoid.DisplayName)
+                })
+            end
+        else
+            if Settings.main.Notifications then
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "<3",
+                    Text = "No target found"
+                })
+            end
+        end
+    end
+    UpdateButton()
+end)
+
+RunService.Stepped:Connect(function()
+    if Settings.main.Mario and LockedPlayer and LockedPlayer.Character then
+        local predictedPosition = ResolveTarget(LockedPlayer)
+        local Vector = CurrentCamera:WorldToViewportPoint(predictedPosition)
+
+        Line.Color = Settings.Tracer.TracerColor
+        Line.Thickness = Settings.Tracer.TracerThickness
+        Line.Transparency = Settings.Tracer.TracerTransparency
+
+        Line.From = Vector2.new(Mouse.X, Mouse.Y + Inset)
+        Line.To = Vector2.new(Vector.X, Vector.Y)
+        Line.Visible = true
+
+        -- Trigger teleportation when aimlock is active
+        if Settings.main.Teleport then
+            TeleportAroundPlayer(LockedPlayer) -- Handles teleporting around the target and camera focus
+        end
+    else
+        Line.Visible = false
+    end
+end)
+
+local function Args()
+    if LockedPlayer and LockedPlayer.Character then
+        local predictedPosition = ResolveTarget(LockedPlayer)
+
+        local args = {
+            [1] = "MOUSE",
+            [2] = predictedPosition
+        }
+
+        return args
+    end
+end
+
+local function Events()
+    local eventNames = {
+        "MainEvent",
+        "MAINEVENT"
+    }
+
+    for _, child in pairs(game.ReplicatedStorage:GetChildren()) do
+        for _, eventName in pairs(eventNames) do
+            if child.Name == eventName then
+                return child
+            end
+        end
+    end
+end
+
+local function FireAtTarget()
+    if Settings.main.Mario and LockedPlayer and LockedPlayer.Character and LockedPlayer.Character:FindFirstChild(Settings.main.Part) then
+        local event = Events()
+        if event then
+            event:FireServer(unpack(Args()))
+        else
+            warn("No valid event found to fire.")
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if Settings.main.Mario and Mouse.Button1Down then
+        FireAtTarget()
+    end
+
+    -- Fire event periodically
+    if Settings.main.Teleport then
+        FireEvent()
+    end
+end)
+
+local function OnCharacterAdded(character)
+    character:WaitForChild("Humanoid").Died:Connect(function()
+        LockedPlayer = nil
+        ResetCamera() -- Reset camera when the locked player dies
+    end)
+
+    -- Reinitialize tools and variables
+    Tool = LocalPlayer.Backpack:FindFirstChild("rev") or LocalPlayer.Character:FindFirstChild("rev")
+end
+
+-- Connect the OnCharacterAdded function
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
